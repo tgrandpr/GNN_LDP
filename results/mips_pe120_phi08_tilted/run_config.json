@@ -1,0 +1,44 @@
+{
+  "args": {
+    "out": "results/mips_pe120_phi08_tilted",
+    "preset": "mips",
+    "ells": [
+      8.0
+    ],
+    "kappa": 3.0,
+    "rho0": null,
+    "v0": null,
+    "Dr": null,
+    "dt": null,
+    "eps": null,
+    "biasing": [
+      -1.0,
+      -0.5,
+      -0.25,
+      0.25,
+      0.5,
+      1.0
+    ],
+    "M": 64,
+    "R": 2,
+    "horizon_factor": 2.5,
+    "t_burn": 6.0,
+    "t_prod": 2.0,
+    "t_prod_max": 8.0,
+    "n_extra": 16,
+    "no_smc": false,
+    "unguided": false,
+    "seed": 0,
+    "overwrite": false
+  },
+  "params": {
+    "rho0": 1.0185916357881302,
+    "v0": 120.0,
+    "Dt": 1.0,
+    "Dr": 3.0,
+    "eps": 1.0,
+    "dt": 2e-05,
+    "interacting": true,
+    "force_cap": 0.0
+  }
+}

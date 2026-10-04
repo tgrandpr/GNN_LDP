@@ -124,6 +124,9 @@ Main options of `run_subvolume_ldp.py`:
 | `--kappa` | `L / ell` |
 | `--rho0`, `--v0`, `--Dr`, `--dt` | model parameters |
 | `--unguided` | twist without control, for comparison |
+| `--preset mips` | inside the MIPS binodal: Pe = 120, phi = 0.8, eps = 1, dt = 2e-5 |
+| `--no-smc` | unbiased (brute-force) sampling only |
+| `--eps`, `--n-extra`, `--t-prod-max` | WCA strength, tuning replicas, maximum production time |
 
 Outputs in the results directory:
 
@@ -134,6 +137,8 @@ Outputs in the results directory:
 | `fig_rate_function.png` | `I_v(rho)`, Legendre points, the `v -> infinity` limit, the Gaussian approximation |
 | `fig_validation.png` | SMC vs brute force (interacting) and vs exact binomial (ideal) |
 | `fig_diagnostics.png` | ESS, population diversity, `N_v` autocorrelation |
+| `fig_coexistence_scaling.png` | `-ln P_v` per unit volume vs per unit length (bulk vs interfaces) |
+| `fig_snapshots.png` | a steady-state configuration per size, with the subvolume outlined |
 | `summary.json`, `summary.md` | all numbers |
 
 ### Caveats
