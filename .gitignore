@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 logs/
 results/_old_code/
+# production outputs are added explicitly (git add -f) once a run has finished
+results/
