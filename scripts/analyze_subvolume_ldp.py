@@ -145,6 +145,7 @@ def analyze_run(r):
     good = w_cnt.sum(0) > 0
     num = np.where(np.isfinite(win_only), w_cnt * np.exp(np.where(np.isfinite(win_only), win_only, 0.0)), 0.0)
     lnP_tilt[good] = np.log(np.maximum(num[:, good].sum(0), 1e-300)) - np.log(w_cnt[:, good].sum(0))
+    tilt_counts = w_cnt.sum(0)
     # exact identities: psi_v'(0) = rho_bar and thermodynamic integration vs SMC ln Z
     lam_ti = np.concatenate([lam, [0.0]])
     mean_ti = np.concatenate([(hist * N).sum(1), [float(r["mean_N"])]])
@@ -164,7 +165,7 @@ def analyze_run(r):
     o = np.argsort(lam0)
     win_lnP = an.window_estimates(hist, -lam[:, None] * N[None, :], r["lnZ"])
     return dict(lnP=lnP, lnP_bf=lnP_bf, lnP_max=lnP_max, rho=rho, I=I, lnZ_wham=lnZ_wham,
-                lnP_tilt=lnP_tilt, lnZ_ti=lnZ_ti,
+                lnP_tilt=lnP_tilt, tilt_counts=tilt_counts, lnZ_ti=lnZ_ti,
                 rho_mean_unbiased=float(r["mean_N"]) / v,
                 mean_rho=mean_rho, rho_l=rho_l, I_l=I_l, I_l_err=lnZ_wham_err / v,
                 lam=lam0[o], psi=psi0[o], psi_err=err0[o], psi_smc=psi_smc0[o], smc_flag=flag0[o],
@@ -439,7 +440,7 @@ def fig_validation(runs, res, path, ideal=None):
     for r, q, c in zip(runs, res, cols):
         ok = np.isfinite(q["lnP_bf"]) & np.isfinite(q["lnP_tilt"])
         cnt = r["hist_tiles"]
-        ok &= cnt >= 20
+        ok &= (cnt >= 20) & (q["tilt_counts"] >= 5.0)   # enough unbiased and tilted samples
         N = np.arange(q["lnP"].size)[ok]
         # brute-force errors from block variation
         blk = r["hist_tiles_blocks"]
