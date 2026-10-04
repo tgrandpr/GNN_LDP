@@ -126,6 +126,7 @@ def main():
             hist_tiles=res.hist_tiles, hist_tiles_blocks=res.hist_tiles_blocks, hist_center=res.hist_center,
             acf=res.acf, acf_t=res.acf_t, tau_v=res.tau_v, var_N=res.var_N, mean_N=res.mean_N,
             v_eff=v_eff, Dt_eff=Dt_eff, horizon=horizon, t_prod_used=res.t_prod_used,
+            snapshot_pos=res.pos[:4].astype(np.float32), snapshot_theta=res.theta[:4].astype(np.float32),
             wall_time=time.time() - t0,
         )
         print(f"[ell={ell:g}] done in {time.time() - t0:.0f}s -> {fn}", flush=True)

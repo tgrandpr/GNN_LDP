@@ -76,6 +76,7 @@ def load_run(fn):
               "v_eff", "Dt_eff", "horizon", "wall_time"):
         r[k] = d[k]
     r["t_prod_used"] = float(d["t_prod_used"]) if "t_prod_used" in d else rcfg["t_prod"]
+    r["snapshot_pos"] = d["snapshot_pos"] if "snapshot_pos" in d else None
     r["N_tot"] = int(r["N_tot"])
     r["ell"], r["v"], r["V"] = geom["ell"], geom["v"], geom["V"]
     r["f"] = r["v"] / r["V"]
@@ -382,6 +383,30 @@ def fig_coexistence(runs, res, path):
     plt.close(fig)
 
 
+def fig_snapshots(runs, path):
+    """One steady-state configuration per subvolume size, subvolume outlined."""
+    sel = [r for r in runs if r.get("snapshot_pos") is not None]
+    if not sel:
+        return
+    fig, ax = plt.subplots(1, len(sel), figsize=(3.6 * len(sel), 3.8), squeeze=False)
+    for a, r in zip(ax[0], sel):
+        pos = r["snapshot_pos"][0]
+        g = r["geom"]
+        a.scatter(pos[0], pos[1], s=max(0.5, 2600.0 / g["L"] ** 2), color=BLUE_RAMP[6], lw=0)
+        lo, hi = g["lo"], g["hi"]
+        a.plot([lo, hi, hi, lo, lo], [lo, lo, hi, hi, lo], color=ORANGE, lw=1.6)
+        a.set_xlim(0, g["L"])
+        a.set_ylim(0, g["L"])
+        a.set_aspect("equal")
+        a.grid(False)
+        a.set_xticks([])
+        a.set_yticks([])
+        a.set_title(f"$\\ell={r['ell']:g}$, $L={g['L']:g}$, $N={r['N_tot']}$")
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
+
 def fig_validation(runs, res, path, ideal=None):
     cols = size_colors(len(runs))
     n = 2 if ideal is not None else 1
@@ -556,6 +581,7 @@ def main():
     fig_validation(runs, res, os.path.join(out, "fig_validation.png"), ideal=ideal)
     fig_diagnostics(runs, os.path.join(out, "fig_diagnostics.png"))
     fig_coexistence(runs, res, os.path.join(out, "fig_coexistence_scaling.png"))
+    fig_snapshots(runs, os.path.join(out, "fig_snapshots.png"))
     binodals = [detect_binodal(q["lnP"], r["v"]) for r, q in zip(runs, res)]
 
     # ---- summary ----
