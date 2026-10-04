@@ -40,6 +40,8 @@ PRESETS = {
     "ideal": dict(rho0=0.4, v0=24.0, Dr=3.0, dt=1e-4, interacting=False),
     # passive WCA fluid (equilibrium reference; slow: tau_v ~ ell^2 / (2 pi^2 Dt))
     "passive": dict(rho0=0.4, v0=0.0, Dr=3.0, dt=1e-4, interacting=True),
+    # inside the MIPS binodal: Pe = 120, phi = pi rho0 / 4 = 0.8, eps = 1 (as in the GNN notebook)
+    "mips": dict(rho0=4 * 0.8 / 3.141592653589793, v0=120.0, Dr=3.0, dt=2e-5, eps=1.0, interacting=True),
 }
 
 
@@ -53,6 +55,7 @@ def parse():
     ap.add_argument("--v0", type=float)
     ap.add_argument("--Dr", type=float)
     ap.add_argument("--dt", type=float)
+    ap.add_argument("--eps", type=float, help="WCA strength")
     ap.add_argument("--biasing", type=float, nargs="+",
                     default=[-1.25, -1.0, -0.75, -0.5, -0.25, 0.25, 0.5, 0.75, 1.0, 1.25],
                     help="biasing fields lambda (conjugate to N_v)")
@@ -61,6 +64,12 @@ def parse():
     ap.add_argument("--horizon-factor", type=float, default=2.5, help="horizon T in units of tau_v")
     ap.add_argument("--t-burn", type=float, default=5.0)
     ap.add_argument("--t-prod", type=float, default=2.0)
+    ap.add_argument("--t-prod-max", type=float, default=16.0,
+                    help="production is extended (doubling) until the N_v ACF decays, up to this time")
+    ap.add_argument("--n-extra", type=int, default=32,
+                    help="extra replicas (never x_0) that set tau_v and the twist parameters")
+    ap.add_argument("--no-smc", action="store_true",
+                    help="unbiased (brute-force) sampling only: M*R independent replicas, no tilted runs")
     ap.add_argument("--unguided", action="store_true", help="twist only, no Doob control")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--overwrite", action="store_true")
@@ -70,7 +79,7 @@ def parse():
 def main():
     a = parse()
     pr = dict(PRESETS[a.preset])
-    for k in ("rho0", "v0", "Dr", "dt"):
+    for k in ("rho0", "v0", "Dr", "dt", "eps"):
         if getattr(a, k) is not None:
             pr[k] = getattr(a, k)
     params = ABPParams(**pr)
@@ -87,7 +96,8 @@ def main():
         geom = Geometry(ell=ell, kappa=a.kappa)
         print(f"[ell={ell:g}] L={geom.L:g} v={geom.v:g} V={geom.V:g} N={geom.n_particles(params.rho0)}",
               flush=True)
-        rcfg = ReservoirConfig(M=a.M * a.R, t_burn=a.t_burn, t_prod=a.t_prod, seed=a.seed + 100 * i)
+        rcfg = ReservoirConfig(M=a.M * a.R, t_burn=a.t_burn, t_prod=a.t_prod, t_prod_max=a.t_prod_max,
+                               n_extra=a.n_extra, seed=a.seed + 100 * i)
         # reservoir streams use SeedSequence([seed, k]); SMC streams use ([seed, lambda, rep, k]),
         # so the two families can never collide
         res = Reservoir(params, geom, rcfg).build()
@@ -99,8 +109,14 @@ def main():
         print(f"[ell={ell:g}] twist parameters v_eff={v_eff:.3f} Dt_eff={Dt_eff:.3f}; "
               f"horizon T={horizon:.3f}", flush=True)
         scfg = SMCConfig(M=a.M, guided=not a.unguided, seed=a.seed + 7 + 100 * i)
-        out = run_lambda_grid(params, geom, scfg, res, a.biasing, a.R, horizon, v_eff, Dt_eff)
-        lnZ, err = combine_replicates(out["lnZ_reps"])
+        lams = [] if a.no_smc else a.biasing
+        if lams:
+            out = run_lambda_grid(params, geom, scfg, res, lams, a.R, horizon, v_eff, Dt_eff)
+            lnZ, err = combine_replicates(out["lnZ_reps"])
+        else:
+            out = dict(lambdas=np.zeros(0), lnZ_reps=np.zeros((0, a.R)),
+                       hist_reps=np.zeros((0, a.R, res.N_tot + 1)), diagnostics=[])
+            lnZ, err = np.zeros(0), np.zeros(0)
         np.savez_compressed(
             fn,
             params=json.dumps(params.to_dict()), geometry=json.dumps(geom.to_dict()),

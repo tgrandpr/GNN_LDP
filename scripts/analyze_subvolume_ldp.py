@@ -103,10 +103,43 @@ def analyze_run(r):
     U = np.vstack([np.zeros(K), -lam[:, None] * N[None, :]])
     lnP, fw = an.wham(H, U, f_init=np.concatenate([[0.0], -r["lnZ"]]))
     lnZ_wham = -(fw[1:] - fw[0])
+    # Primary normalisation: self-consistent WHAM (set by the overlap of the tilted histograms),
+    # with errors from per-replicate WHAM.  The SMC ln Z is kept as a cross-check: at the largest
+    # tilts its finite-population (weight-degeneracy) bias makes it too low.
+    R = r["hist_reps"].shape[1]
+    lnZ_wham_reps = np.zeros((lam.size, R))
+    for k in range(R):
+        n_eff_k = np.zeros(lam.size)
+        for dct in r["diag"]:
+            if dct["rep"] == k:
+                a = int(np.argmin(np.abs(lam - dct["lam"])))
+                n_eff_k[a] = max(1.0, min(dct["ess_final"] * M, dct["n_ancestors"]))
+        Hk = np.vstack([bf * n_eff_bf, r["hist_reps"][:, k] * n_eff_k[:, None]])
+        _, fk = an.wham(Hk, U, f_init=np.concatenate([[0.0], -r["lnZ_reps"][:, k]]))
+        lnZ_wham_reps[:, k] = -(fk[1:] - fk[0])
+    lnZ_wham_err = (np.std(lnZ_wham_reps, axis=1, ddof=1) / np.sqrt(R)) if R > 1 else np.zeros(lam.size)
+    # flag SMC ln Z that is inconsistent with WHAM or violates convexity:
+    # ln Z(l2) >= ln Z(l1) + (l2 - l1) <N>_{l1}
+    meanN_t = (hist * N).sum(1)
+    smc_flag = np.abs(r["lnZ"] - lnZ_wham) > 3 * np.maximum(r["lnZ_err"], lnZ_wham_err) + 0.5
+    order_l = np.argsort(lam)
+    lam_s, lnZ_s, mN_s = lam[order_l], r["lnZ"][order_l], meanN_t[order_l]
+    lam_full = np.concatenate([lam_s, [0.0]])
+    lnZ_full = np.concatenate([lnZ_s, [0.0]])
+    mN_full = np.concatenate([mN_s, [float(r["mean_N"])]])
+    of = np.argsort(lam_full)
+    lam_full, lnZ_full, mN_full = lam_full[of], lnZ_full[of], mN_full[of]
+    conv_viol = np.zeros(lam.size, bool)
+    for a in range(lam.size):
+        j = int(np.flatnonzero(np.isclose(lam_full, lam[a]))[0])
+        nb = j - 1 if lam[a] > 0 else j + 1     # neighbour towards lambda = 0
+        bound = lnZ_full[nb] + (lam_full[j] - lam_full[nb]) * mN_full[nb]
+        conv_viol[a] = lnZ_full[j] < bound - 3 * max(r["lnZ_err"][a], 1e-3)
+    smc_flag |= conv_viol
     # tilted windows only, normalised with the SMC ln Z: independent of the brute-force data
     win_only = an.window_estimates(hist, -lam[:, None] * N[None, :], r["lnZ"])
     with np.errstate(divide="ignore"):
-        w_cnt = hist * n_eff[:, None]
+        w_cnt = hist * n_eff[:, None] * (~smc_flag)[:, None]
     lnP_tilt = np.full(K, -np.inf)
     good = w_cnt.sum(0) > 0
     num = np.where(np.isfinite(win_only), w_cnt * np.exp(np.where(np.isfinite(win_only), win_only, 0.0)), 0.0)
@@ -120,19 +153,22 @@ def analyze_run(r):
     with np.errstate(divide="ignore"):
         lnP_bf = np.log(bf)
     mean_rho = (hist * N).sum(1) / v
-    rho_l, I_l = an.tilted_rate_points(lam, r["lnZ"], mean_rho, v)
-    # include lambda = 0 in psi
+    rho_l, I_l = an.tilted_rate_points(lam, lnZ_wham, mean_rho, v)
+    # include lambda = 0 in psi (primary: WHAM normalisation)
     lam0 = np.concatenate([lam, [0.0]])
-    psi0 = np.concatenate([r["lnZ"], [0.0]]) / v
-    err0 = np.concatenate([r["lnZ_err"], [0.0]]) / v
+    psi0 = np.concatenate([lnZ_wham, [0.0]]) / v
+    err0 = np.concatenate([lnZ_wham_err, [0.0]]) / v
+    psi_smc0 = np.concatenate([r["lnZ"], [0.0]]) / v
+    flag0 = np.concatenate([smc_flag, [False]])
     o = np.argsort(lam0)
     win_lnP = an.window_estimates(hist, -lam[:, None] * N[None, :], r["lnZ"])
     return dict(lnP=lnP, lnP_bf=lnP_bf, lnP_max=lnP_max, rho=rho, I=I, lnZ_wham=lnZ_wham,
                 lnP_tilt=lnP_tilt, lnZ_ti=lnZ_ti,
                 rho_mean_unbiased=float(r["mean_N"]) / v,
-                mean_rho=mean_rho, rho_l=rho_l, I_l=I_l, I_l_err=r["lnZ_err"] / v,
-                lam=lam0[o], psi=psi0[o], psi_err=err0[o], chi=r["var_N"] / v, win_lnP=win_lnP,
-                n_eff=n_eff)
+                mean_rho=mean_rho, rho_l=rho_l, I_l=I_l, I_l_err=lnZ_wham_err / v,
+                lam=lam0[o], psi=psi0[o], psi_err=err0[o], psi_smc=psi_smc0[o], smc_flag=flag0[o],
+                lnZ_wham_err=lnZ_wham_err, smc_flag_t=smc_flag,
+                chi=r["var_N"] / v, win_lnP=win_lnP, n_eff=n_eff)
 
 
 def exact_ideal(r):
@@ -162,7 +198,10 @@ def fit_inverse_ell(ells, y, yerr=None, order=1):
     dof = ok.sum() - (order + 1)
     if dof > 0:
         chi2 = np.sum((Aw @ coef - yw) ** 2) / dof
-        cov = cov * max(chi2, 1.0)
+        # with known errors inflate by the reduced chi^2 if > 1; without errors use the residual variance
+        cov = cov * (max(chi2, 1.0) if yerr is not None else chi2)
+    elif yerr is None:
+        cov = cov * np.nan
     return float(coef[0]), float(np.sqrt(cov[0, 0])), coef
 
 
@@ -177,6 +216,10 @@ def fig_scgf(runs, res, ext, path, ideal_ref=True):
     for r, q, c in zip(runs, res, cols):
         a.errorbar(q["lam"], q["psi"], yerr=q["psi_err"], color=c, marker="o", ms=4, lw=1.2,
                    label=f"$\\ell={r['ell']:g}$ ($v={r['v']:g}$)")
+        fl = q["smc_flag"]
+        if np.any(fl):
+            a.plot(q["lam"][fl], q["psi_smc"][fl], ls="none", marker="o", ms=6, mfc="none", mec=c, mew=1.0)
+    a.plot([], [], ls="none", marker="o", mfc="none", mec=INK2, label="SMC $\\ln\\hat Z/v$ (flagged: degenerate)")
     a.errorbar(ext["lam"], ext["psi_inf"], yerr=ext["psi_inf_err"], color=ORANGE, lw=1.6, marker="D", ms=4.5,
                label=r"$v\to\infty$ (fit in $1/\ell$)")
     if ideal_ref:
@@ -276,6 +319,64 @@ def fig_collapse(runs, res, path):
         a.legend(loc="upper center", ncol=3)
     ymax = max(np.nanmax(-(q["lnP"][np.isfinite(q["lnP"])] - q["lnP_max"])) for q in res)
     ax[0].set_ylim(-0.5, ymax * 1.15)
+    fig.tight_layout()
+    fig.savefig(path, dpi=160)
+    plt.close(fig)
+
+
+def detect_binodal(lnP, v, min_dip=1.0):
+    """Two-peak structure of ln P_v(N): returns (rho_gas, rho_liquid, dip) or None.
+
+    Local maxima of a lightly smoothed ln P separated by a minimum at least
+    ``min_dip`` below the lower peak signal phase coexistence."""
+    ok = np.isfinite(lnP)
+    N = np.arange(lnP.size)[ok]
+    y = lnP[ok]
+    if y.size < 7:
+        return None
+    k = max(1, int(round(0.02 * v)))
+    ys = np.convolve(y, np.ones(2 * k + 1) / (2 * k + 1), mode="same")
+    ys[:k] = y[:k]
+    ys[-k:] = y[-k:]
+    peaks = [i for i in range(1, ys.size - 1) if ys[i] >= ys[i - 1] and ys[i] >= ys[i + 1]]
+    best = None
+    for a in range(len(peaks)):
+        for b in range(a + 1, len(peaks)):
+            i, j = peaks[a], peaks[b]
+            dip = min(ys[i], ys[j]) - ys[i:j + 1].min()
+            if dip >= min_dip and (best is None or dip > best[2]):
+                best = (N[i] / v, N[j] / v, float(dip))
+    return best
+
+
+def fig_coexistence(runs, res, path):
+    """-ln P_v unscaled, per unit volume (bulk LDP) and per unit length (interfaces)."""
+    cols = size_colors(len(runs))
+    fig, ax = plt.subplots(1, 3, figsize=(15, 4.0))
+    for r, q, c in zip(runs, res, cols):
+        ok = np.isfinite(q["lnP"])
+        N = np.arange(q["lnP"].size)[ok]
+        y = -(q["lnP"][ok] - q["lnP_max"])
+        lab = f"$\\ell={r['ell']:g}$"
+        ax[0].plot(N / r["v"], y, color=c, lw=1.4, label=lab)
+        ax[1].plot(N / r["v"], y / r["v"], color=c, lw=1.4, label=lab)
+        ax[2].plot(N / r["v"], y / r["ell"], color=c, lw=1.4, label=lab)
+    bn = detect_binodal(res[-1]["lnP"], runs[-1]["v"])
+    if bn is not None:
+        for a in ax:
+            for x in bn[:2]:
+                a.axvline(x, color=MUTED, ls=":", lw=1.0)
+        ax[1].annotate(f"peaks at $\\rho\\approx{bn[0]:.2f}$ and ${bn[1]:.2f}$", (0.5, 0.92),
+                       xycoords="axes fraction", ha="center", color=INK2, fontsize=8.5)
+    ax[0].set_ylabel(r"$-\ln P_v+\ln P_v^{\max}$")
+    ax[1].set_ylabel(r"$-\frac{1}{v}[\ln P_v-\ln P_v^{\max}]$  (bulk: $v=\ell^2$)")
+    ax[2].set_ylabel(r"$-\frac{1}{\ell}[\ln P_v-\ln P_v^{\max}]$  (interfaces)")
+    ax[0].set_title("Unscaled")
+    ax[1].set_title(r"Volume scaling: collapses outside coexistence")
+    ax[2].set_title(r"Length scaling: collapses inside coexistence")
+    for a in ax:
+        a.set_xlabel(r"$\rho=N_v/v$")
+        a.legend(loc="upper center", ncol=3)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
     plt.close(fig)
@@ -404,14 +505,26 @@ def main():
         I_inf.append(a0)
         I_inf_err.append(e0)
     I_inf = np.array(I_inf)
+    # trust the point-wise extrapolation only inside the range spanned by the extrapolated
+    # Legendre pairs (where every size is sampled by the tilted ensembles)
+    if len(rho_l_inf):
+        okr = np.isfinite(rho_l_inf)
+        if okr.any():
+            lo_l, hi_l = np.nanmin(np.array(rho_l_inf)[okr]), np.nanmax(np.array(rho_l_inf)[okr])
+            I_inf = np.where((rho_grid >= lo_l) & (rho_grid <= hi_l), I_inf, np.nan)
     rho_bar = runs[-1]["rho_bar"]
     f = runs[-1]["f"]
     chi_vals = [r["var_N"] / r["v"] for r in runs]
     chi_inf, chi_inf_err, _ = fit_inverse_ell([runs[i]["ell"] for i in fit_runs],
                                               [chi_vals[i] for i in fit_runs], None, order=a.fit_order)
     I0_inf = an.deconvolve_finite_reservoir(rho_grid, I_inf, rho_bar, f) if f < 0.5 else np.full_like(I_inf, np.nan)
-    span = rho_grid.max() - rho_grid.min() if rho_grid.size else 0
-    rho_sel = [rho_bar + d * span for d in (-0.4, -0.2, 0.2, 0.4)] if span > 0 else []
+    fin = rho_grid[np.isfinite(I_inf)]
+    if fin.size:
+        lo_s, hi_s = fin.min(), fin.max()
+        rho_sel = [rho_bar - 0.8 * (rho_bar - lo_s), rho_bar - 0.4 * (rho_bar - lo_s),
+                   rho_bar + 0.4 * (hi_s - rho_bar), rho_bar + 0.8 * (hi_s - rho_bar)]
+    else:
+        rho_sel = []
     rho_sel = [float(np.round(x, 2)) for x in rho_sel]
     coef_rho = []
     for rs in rho_sel:
@@ -442,6 +555,8 @@ def main():
     fig_collapse(runs, res, os.path.join(out, "fig_volume_scaling.png"))
     fig_validation(runs, res, os.path.join(out, "fig_validation.png"), ideal=ideal)
     fig_diagnostics(runs, os.path.join(out, "fig_diagnostics.png"))
+    fig_coexistence(runs, res, os.path.join(out, "fig_coexistence_scaling.png"))
+    binodals = [detect_binodal(q["lnP"], r["v"]) for r, q in zip(runs, res)]
 
     # ---- summary ----
     summary = dict(
@@ -450,10 +565,14 @@ def main():
                     mean_N=float(r["mean_N"]), tau_v=float(r["tau_v"]), v_eff=float(r["v_eff"]),
                     Dt_eff=float(r["Dt_eff"]), horizon=float(r["horizon"]), wall_time_s=float(r["wall_time"]),
                     rho_bar=r["rho_bar"], rho_mean_unbiased=q["rho_mean_unbiased"],
-                    lnZ_smc=r["lnZ"].tolist(), lnZ_thermo_integration=q["lnZ_ti"].tolist(),
+                    lnZ_smc=r["lnZ"].tolist(), lnZ_smc_err=r["lnZ_err"].tolist(),
+                    lnZ_wham=q["lnZ_wham"].tolist(), lnZ_wham_err=q["lnZ_wham_err"].tolist(),
+                    smc_flag=q["smc_flag_t"].tolist(), lnZ_thermo_integration=q["lnZ_ti"].tolist(),
                     lambdas=q["lam"].tolist(), psi=q["psi"].tolist(), psi_err=q["psi_err"].tolist(),
                     rho_lambda=q["mean_rho"].tolist(), I_lambda=q["I_l"].tolist())
                for r, q in zip(runs, res)],
+        two_peak_structure=[None if b is None else dict(ell=r["ell"], rho_low=b[0], rho_high=b[1],
+                                                        lnP_dip=b[2]) for r, b in zip(runs, binodals)],
         extrapolated=dict(lambdas=lam_grid.tolist(), psi_inf=ext["psi_inf"].tolist(),
                           psi_inf_err=ext["psi_inf_err"].tolist(), rho=rho_grid.tolist(),
                           I_inf=I_inf.tolist(), I0_inf=np.where(np.isfinite(I0_inf), I0_inf, None).tolist(),
@@ -469,17 +588,28 @@ def main():
              f"Parameters: {runs[0]['params']}  ", f"kappa = L/ell = {runs[0]['geom']['kappa']:g}, "
              f"f = v/V = {f:.4f}, global density rho_bar = {rho_bar:.4f}", "",
              "| ell | v | N | chi_v = Var(N_v)/v | <N_v>/v (rho_bar) | tau_v | v_eff | Dt_eff | horizon | "
-             "max abs(lnZ_TI - lnZ_SMC) | wall time [s] |",
+             "max abs(lnZ_TI - lnZ_WHAM) | wall time [s] |",
              "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r, q in zip(runs, res):
-        dti = np.max(np.abs(q["lnZ_ti"] - r["lnZ"]))
+        dti = np.max(np.abs(q["lnZ_ti"] - q["lnZ_wham"])) if len(r["lnZ"]) else float("nan")
         lines.append(f"| {r['ell']:g} | {r['v']:g} | {r['N_tot']} | {r['var_N'] / r['v']:.4f} | "
                      f"{q['rho_mean_unbiased']:.4f} ({r['rho_bar']:.4f}) | "
                      f"{float(r['tau_v']):.3f} | {float(r['v_eff']):.2f} | {float(r['Dt_eff']):.2f} | "
                      f"{float(r['horizon']):.2f} | {dti:.2f} | {float(r['wall_time']):.0f} |")
+    for r, b in zip(runs, binodals):
+        if b is not None:
+            lines.append(f"\nell={r['ell']:g}: two-peak P_v (phase coexistence): rho ~ {b[0]:.3f} and "
+                         f"{b[1]:.3f}, ln P dip {b[2]:.2f}")
     lines += ["", "lnZ_TI: trapezoidal thermodynamic integration of <N_v>_lambda over the lambda grid "
               "(a coarse-grid consistency check, accurate to O(dlambda^2 Var'))."]
-    lines += ["", "psi_v(lambda) = (1/v) ln E[exp(lambda N_v)]:", "",
+    lines += ["", "SMC ln Z vs WHAM ln Z (flag * = SMC estimate degenerate: inconsistent with WHAM or "
+              "violating convexity; WHAM is used):", ""]
+    for r, q in zip(runs, res):
+        lam_t = np.asarray(r["lambdas"], float)
+        ent = [f"{l:+.2f}: {z:.2f}/{w:.2f}{'*' if f_ else ''}"
+               for l, z, w, f_ in zip(lam_t, r["lnZ"], q["lnZ_wham"], q["smc_flag_t"])]
+        lines.append(f"- ell={r['ell']:g}: " + ", ".join(ent))
+    lines += ["", "psi_v(lambda) = (1/v) ln E[exp(lambda N_v)] (WHAM normalisation, per-replicate errors):", "",
               "| lambda | " + " | ".join(f"ell={r['ell']:g}" for r in runs) + " | v -> inf |",
               "|---" * (len(runs) + 2) + "|"]
     for j, l in enumerate(lam_grid):
