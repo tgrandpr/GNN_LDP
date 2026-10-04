@@ -27,7 +27,10 @@ preserve P_ss,
     Z_hat = prod over resampling epochs of mean_i(w_i)   is unbiased for Z_v(lambda),
 
 and the final weighted population samples pi_lambda.  This holds for ANY twist;
-the twist and M only set the variance.  Importantly, lambda is never "held":
+the twist and M only set the variance.  (Strictly, exact unbiasedness holds for a
+resampling schedule fixed in advance; with the ESS-triggered schedule used here the
+estimator is consistent with an O(1/M) bias, negligible against the statistical error
+and checked against the exact binomial result for ideal ABPs.)  Importantly, lambda is never "held":
 holding a tilt against dynamics that relax to P_ss makes the variance grow like
 exp(lambda^2 Var N_v), i.e. exponentially in v.
 
@@ -48,8 +51,6 @@ from .twist import advance_controlled, twist_energy
 @dataclass
 class SMCConfig:
     M: int = 128                 # replicas per run
-    horizon: float = 0.0         # T; 0 -> horizon_factor * tau_v (measured)
-    horizon_factor: float = 3.0
     n_weight: int = 20           # steps between weightings (cheap; resampling is adaptive)
     ess_threshold: float = 0.5
     guided: bool = True          # Doob-guided dynamics (control force + torque) with Girsanov weights

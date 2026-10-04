@@ -103,6 +103,18 @@ def analyze_run(r):
     U = np.vstack([np.zeros(K), -lam[:, None] * N[None, :]])
     lnP, fw = an.wham(H, U, f_init=np.concatenate([[0.0], -r["lnZ"]]))
     lnZ_wham = -(fw[1:] - fw[0])
+    # tilted windows only, normalised with the SMC ln Z: independent of the brute-force data
+    win_only = an.window_estimates(hist, -lam[:, None] * N[None, :], r["lnZ"])
+    with np.errstate(divide="ignore"):
+        w_cnt = hist * n_eff[:, None]
+    lnP_tilt = np.full(K, -np.inf)
+    good = w_cnt.sum(0) > 0
+    num = np.where(np.isfinite(win_only), w_cnt * np.exp(np.where(np.isfinite(win_only), win_only, 0.0)), 0.0)
+    lnP_tilt[good] = np.log(np.maximum(num[:, good].sum(0), 1e-300)) - np.log(w_cnt[:, good].sum(0))
+    # exact identities: psi_v'(0) = rho_bar and thermodynamic integration vs SMC ln Z
+    lam_ti = np.concatenate([lam, [0.0]])
+    mean_ti = np.concatenate([(hist * N).sum(1), [float(r["mean_N"])]])
+    lnZ_ti = an.thermodynamic_integration(lam_ti, mean_ti)[:-1]
     rho, I = an.rate_function(lnP, v)
     lnP_max = np.max(lnP[np.isfinite(lnP)])
     with np.errstate(divide="ignore"):
@@ -116,6 +128,8 @@ def analyze_run(r):
     o = np.argsort(lam0)
     win_lnP = an.window_estimates(hist, -lam[:, None] * N[None, :], r["lnZ"])
     return dict(lnP=lnP, lnP_bf=lnP_bf, lnP_max=lnP_max, rho=rho, I=I, lnZ_wham=lnZ_wham,
+                lnP_tilt=lnP_tilt, lnZ_ti=lnZ_ti,
+                rho_mean_unbiased=float(r["mean_N"]) / v,
                 mean_rho=mean_rho, rho_l=rho_l, I_l=I_l, I_l_err=r["lnZ_err"] / v,
                 lam=lam0[o], psi=psi0[o], psi_err=err0[o], chi=r["var_N"] / v, win_lnP=win_lnP,
                 n_eff=n_eff)
@@ -273,7 +287,7 @@ def fig_validation(runs, res, path, ideal=None):
     fig, ax = plt.subplots(1, n, figsize=(5.4 * n, 3.9), squeeze=False)
     a = ax[0, 0]
     for r, q, c in zip(runs, res, cols):
-        ok = np.isfinite(q["lnP_bf"]) & np.isfinite(q["lnP"])
+        ok = np.isfinite(q["lnP_bf"]) & np.isfinite(q["lnP_tilt"])
         cnt = r["hist_tiles"]
         ok &= cnt >= 20
         N = np.arange(q["lnP"].size)[ok]
@@ -282,12 +296,12 @@ def fig_validation(runs, res, path, ideal=None):
         with np.errstate(divide="ignore", invalid="ignore"):
             lb = np.log(blk / blk.sum(1, keepdims=True))
         e = np.nanstd(np.where(np.isfinite(lb), lb, np.nan), axis=0) / np.sqrt(blk.shape[0])
-        a.errorbar(N / r["v"], q["lnP"][ok] - q["lnP_bf"][ok], yerr=e[ok], color=c, marker="o", ms=3,
+        a.errorbar(N / r["v"], q["lnP_tilt"][ok] - q["lnP_bf"][ok], yerr=e[ok], color=c, marker="o", ms=3,
                    ls="none", lw=0.8, label=f"$\\ell={r['ell']:g}$")
     a.axhline(0, color=AXIS, lw=1)
     a.set_xlabel(r"$\rho=N_v/v$")
-    a.set_ylabel(r"$\ln P_v^{\rm SMC+WHAM}-\ln P_v^{\rm brute\ force}$")
-    a.set_title("Interacting ABPs: biased vs unbiased sampling")
+    a.set_ylabel(r"$\ln P_v^{\rm tilted\ SMC}-\ln P_v^{\rm brute\ force}$")
+    a.set_title("Tilted ensembles only vs unbiased histograms")
     a.legend(ncol=2)
     if ideal is not None:
         b = ax[0, 1]
@@ -435,6 +449,8 @@ def main():
         sizes=[dict(ell=r["ell"], v=r["v"], N_tot=r["N_tot"], chi_v=r["var_N"] / r["v"],
                     mean_N=float(r["mean_N"]), tau_v=float(r["tau_v"]), v_eff=float(r["v_eff"]),
                     Dt_eff=float(r["Dt_eff"]), horizon=float(r["horizon"]), wall_time_s=float(r["wall_time"]),
+                    rho_bar=r["rho_bar"], rho_mean_unbiased=q["rho_mean_unbiased"],
+                    lnZ_smc=r["lnZ"].tolist(), lnZ_thermo_integration=q["lnZ_ti"].tolist(),
                     lambdas=q["lam"].tolist(), psi=q["psi"].tolist(), psi_err=q["psi_err"].tolist(),
                     rho_lambda=q["mean_rho"].tolist(), I_lambda=q["I_l"].tolist())
                for r, q in zip(runs, res)],
@@ -452,12 +468,17 @@ def main():
     lines = ["# Subvolume-density large deviations: summary", "",
              f"Parameters: {runs[0]['params']}  ", f"kappa = L/ell = {runs[0]['geom']['kappa']:g}, "
              f"f = v/V = {f:.4f}, global density rho_bar = {rho_bar:.4f}", "",
-             "| ell | v | N | chi_v = Var(N_v)/v | tau_v | v_eff | Dt_eff | horizon | wall time [s] |",
-             "|---|---|---|---|---|---|---|---|---|"]
-    for r in runs:
+             "| ell | v | N | chi_v = Var(N_v)/v | <N_v>/v (rho_bar) | tau_v | v_eff | Dt_eff | horizon | "
+             "max abs(lnZ_TI - lnZ_SMC) | wall time [s] |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for r, q in zip(runs, res):
+        dti = np.max(np.abs(q["lnZ_ti"] - r["lnZ"]))
         lines.append(f"| {r['ell']:g} | {r['v']:g} | {r['N_tot']} | {r['var_N'] / r['v']:.4f} | "
+                     f"{q['rho_mean_unbiased']:.4f} ({r['rho_bar']:.4f}) | "
                      f"{float(r['tau_v']):.3f} | {float(r['v_eff']):.2f} | {float(r['Dt_eff']):.2f} | "
-                     f"{float(r['horizon']):.2f} | {float(r['wall_time']):.0f} |")
+                     f"{float(r['horizon']):.2f} | {dti:.2f} | {float(r['wall_time']):.0f} |")
+    lines += ["", "lnZ_TI: trapezoidal thermodynamic integration of <N_v>_lambda over the lambda grid "
+              "(a coarse-grid consistency check, accurate to O(dlambda^2 Var'))."]
     lines += ["", "psi_v(lambda) = (1/v) ln E[exp(lambda N_v)]:", "",
               "| lambda | " + " | ".join(f"ell={r['ell']:g}" for r in runs) + " | v -> inf |",
               "|---" * (len(runs) + 2) + "|"]

@@ -1,7 +1,8 @@
 # Theory note: static large deviations of the subvolume density in active Brownian particles
 
-This note explains what `abp_ldp/` computes and why the algorithm is exact. Every
-symbol below appears in the code under the same name.
+This note explains what `abp_ldp/` computes and why the algorithm is exact. Code names are
+given where they differ: $\lambda$ is `lam`/`biasing`, $v_0$ is `v0`, $\bar\rho=N/V$ is `rho_bar`.
+Below, $v=\ell^2$ always denotes the subvolume area and $v_0$ the self-propulsion speed.
 
 ## 1. Model and observable
 
@@ -54,8 +55,8 @@ $$
 
 This reduces to the Poisson result $I_0=\rho\ln(\rho/\bar\rho)-\rho+\bar\rho$ as $f\to0$.
 
-If the static fluctuations are additive (exact in equilibrium with short-range forces, a
-*hypothesis* for ABPs), then in general
+If the static fluctuations are additive (exact in equilibrium with short-range forces away
+from coexistence and criticality, a *hypothesis* for ABPs), then in general
 
 $$
 I_f(\rho)=I_0(\rho)+\frac{1-f}{f}\,I_0(\rho_{\rm out}).
@@ -75,13 +76,14 @@ $P_{ss}$ is a nonequilibrium steady state. It is not Boltzmann and it is unknown
 out three standard approaches:
 
 * **Metropolis Monte Carlo** on $P_{ss}e^{\lambda N_v}$ needs $P_{ss}$ itself.
-* **A bias potential $U$ in the dynamics** does not produce $P_{ss}e^{-U}$. With the
-  steady-state current $\mathbf J_{ss}\neq0$, one finds
+* **A bias potential $U$ in the dynamics** does not produce $P_{ss}e^{-U}$. For a bias force
+  $-\nabla U$ (units $D_t=\mu=1$, $U$ independent of $\theta$) and the nonzero translational
+  steady-state current $\mathbf J_{ss}$, one finds
   $\mathcal L_U^\dagger(P_{ss}e^{-U})=e^{-U}\,\nabla U\cdot\mathbf J_{ss}\neq0$.
 * **Cloning with a tilt held fixed in time** has weights that fight the dynamics: the
   unbiased dynamics keeps relaxing the tilted population back to $P_{ss}$. The relative
-  variance of the weights grows like
-  $Z(\lambda)Z(-\lambda)\simeq e^{\lambda^2\,\mathrm{Var}\,N_v}$, i.e. exponentially in $v$.
+  second moment of the weights grows like $Z(\lambda)Z(-\lambda)\approx e^{\lambda^2\,\mathrm{Var}\,N_v}$
+  (Gaussian approximation), i.e. exponentially in $v$.
   We observed this collapse directly in the development tests.
 
 ## 4. Feynman–Kac identity with a terminal tilt
@@ -101,15 +103,18 @@ $$
 G_0=e^{-U_0(x_0)},\qquad G_k=e^{-U_k(x_{t_k})+U_{k-1}(x_{t_{k-1}})}
 $$
 
-telescope to $e^{\lambda N_v(x_T)}$. Sequential Monte Carlo with resampling then makes the
-product of the mean weights over the resampling epochs an **unbiased** estimator of $Z_v$, and
-its final weighted population samples $\pi_\lambda$.
+telescope to $e^{\lambda N_v(x_T)}$. The code evaluates the weights every 20 steps. It resamples
+(systematic resampling) whenever the effective sample size drops below $M/2$, never at the
+final time. The estimator of $Z_v$ is the product of the mean weights over the resampling
+epochs. For a resampling schedule fixed in advance it is exactly **unbiased**. With the
+ESS-triggered schedule it is consistent with an $O(1/M)$ bias, which the exact-binomial tests
+bound to below the statistical error. The final weighted population samples $\pi_\lambda$.
 
 This holds **for any twist**: the twist only controls the variance. Ramp speed and holding
 time matter only through the variance too, which is why $\lambda$ is never held fixed (§3).
 
-**Optimal twist.** The minimum-variance twist is the value function
-$h_s(x)=\ln\mathbb E[e^{\lambda N_v(x_T)}\mid x_{T-s}=x]$. For non-interacting ABPs it is
+**Optimal twist.** The minimum-variance choice is $U_k=-h_{T-t_k}$, with the value function
+$h_s(x)=\ln\mathbb E[e^{\lambda N_v(x_T)}\mid x_{T-s}=x]$. For non-interacting ABPs $h_s$ is
 exactly one-body:
 
 $$
@@ -118,15 +123,19 @@ h_s(x)=\sum_i\phi_s(\mathbf r_i,\theta_i),\qquad
 $$
 
 where $p_s$ is the probability that a free ABP starting at $(\mathbf r,\theta)$ is in the
-subvolume after time $s$. We approximate the displacement by a Gaussian with the exact free-ABP
-moments:
+subvolume after time $s$. We approximate the free-ABP displacement by an isotropic Gaussian with
+the exact mean and the exact total mean square displacement:
 
-* mean $\frac{v}{D_r}(1-e^{-D_r s})\,\mathbf e(\theta)$;
-* mean square displacement $4D_ts+2\frac{v^2}{D_r^2}(D_rs-1+e^{-D_rs})$.
+* mean $\mathbf m_s=\frac{v_0}{D_r}(1-e^{-D_r s})\,\mathbf e(\theta)$;
+* $\mathrm{MSD}(s)=4D_ts+2\frac{v_0^2}{D_r^2}(D_rs-1+e^{-D_rs})$;
+* per-axis variance $\sigma_s^2=[\mathrm{MSD}(s)-|\mathbf m_s|^2]/2$. This matches the trace
+  of the true covariance but not its anisotropy along $\mathbf e(\theta)$.
 
-The required periodic images are included. For interacting particles $v$ and $D_t$ are
-replaced by effective values $(v_{\rm eff},D_{t,\rm eff})$, measured from tagged-particle
-displacements on replicas that are never used as $x_0$ (`twist.py`).
+The required periodic images are included. For interacting particles $v_0$ and $D_t$ are
+replaced by effective values $(v_{0,\rm eff},D_{t,\rm eff})$, measured from tagged-particle
+displacements (`smc.Reservoir.measure_self_propagation`). These come from extra replicas that
+are never used as $x_0$, and the same replicas set $\tau_v$ and hence the horizon $T$, so
+neither the twist nor $T$ depends on the samples it weights.
 
 ## 5. Doob-guided dynamics and exact Girsanov weights
 
@@ -137,8 +146,11 @@ $$
 \mathbf u_i=2D_t\,\nabla_{\mathbf r_i}\phi_s,\qquad w_i=2D_r\,\partial_{\theta_i}\phi_s .
 $$
 
-For non-interacting particles this is exactly the Doob transform of the terminal tilt, and
-the importance weights become constant. Every Euler–Maruyama step has Gaussian transition
+With the exact free-particle value function and in continuous time, this would be exactly the
+Doob transform of the terminal tilt for non-interacting particles, and the weights would be
+constant. The implementation approximates it: Gaussian $p_s$, control refreshed every 10 steps
+(every step over the last 50), remaining time floored at $5\Delta t$, and a discrete time step.
+The weights are therefore only nearly constant. None of this affects correctness. Every Euler–Maruyama step has Gaussian transition
 densities under both $P$ and $Q$. Using the standard normals $\boldsymbol\xi,\eta$ drawn by
 $Q$, the log-likelihood ratio of one step is exact for the discrete chains:
 
@@ -160,7 +172,7 @@ independent replicate runs, with jackknife errors. Each run also yields a weight
 of $N_v$ sampled from $\pi_\lambda$. The tilted histograms and the unbiased brute-force
 histogram are combined by WHAM. The unbiased histogram uses all $\kappa^2$ tiled placements of
 the subvolume, which is valid because $P_{ss}$ is translation invariant. WHAM gives
-$\ln P_v(N)$ over the whole density range, and
+$\ln P_v(N)$ over the density range reached by the sampled tilts, and
 
 $$
 I_v(\rho)=-\frac1v\Big[\ln P_v(\rho v)-\max_N\ln P_v(N)\Big].
@@ -184,12 +196,14 @@ at fixed $f$, $-\ln P_v$ scales like $\ell$ (interfaces) rather than $v$.
 * **Exact reference:** non-interacting ABPs have $N_v\sim\mathrm{Bin}(N,f)$, so
   $\ln Z_v=N\ln(1-f+fe^\lambda)$. SMC must reproduce it at every $\ell$ and $\lambda$
   (`tests/test_smc.py`, `--preset ideal`).
-* **Brute force:** for interacting ABPs, SMC+WHAM must agree with the unbiased histograms
-  wherever those are reliable.
-* **Exact identities:**
-  * $\psi_v(0)=0$;
-  * $\psi_v'(0)=\bar\rho$ (translation invariance);
-  * thermodynamic integration $\ln Z(\lambda)=\int_0^\lambda\langle N_v\rangle_{\lambda'}\,\mathrm d\lambda'$.
+* **Brute force:** for interacting ABPs, $\ln P_v$ rebuilt from the tilted ensembles *alone*
+  (normalised by the SMC $\ln Z$, without the brute-force window) must agree with the unbiased
+  histograms wherever those are reliable (`fig_validation.png`).
+* **Exact identities reported in `summary.md`:**
+  * $\langle N_v\rangle_{ss}/v=\bar\rho$ (translation invariance, i.e. $\psi_v'(0)=\bar\rho$);
+  * thermodynamic integration $\ln Z(\lambda)=\int_0^\lambda\langle N_v\rangle_{\lambda'}\,\mathrm d\lambda'$
+    against the SMC $\ln Z$ (trapezoid on the $\lambda$ grid, so only a coarse check).
+  * $\psi_v(0)=0$ holds by construction.
 * **Diagnostics:** effective sample size, number of distinct $t=0$ ancestors, the $N_v$
   autocorrelation and its time $\tau_v$ (the horizon is $T\approx2.5\,\tau_v$), and
   simulator blow-up detection.
