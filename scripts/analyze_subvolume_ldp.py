@@ -436,12 +436,14 @@ def fig_validation(runs, res, path, ideal=None):
         for r, q, c in zip(iruns, ires, icols):
             lam = np.asarray(r["lambdas"], float)
             ex = an.binomial_lnZ(r["N_tot"], r["f"], lam)
-            b.errorbar(lam, r["lnZ"] - ex, yerr=r["lnZ_err"], color=c, marker="o", ms=3.5, lw=1.0,
+            b.errorbar(lam, q["lnZ_wham"] - ex, yerr=q["lnZ_wham_err"], color=c, marker="o", ms=3.5, lw=1.0,
                        label=f"$\\ell={r['ell']:g}$")
+            b.plot(lam + 0.03, r["lnZ"] - ex, ls="none", marker="o", ms=4, mfc="none", mec=c, mew=0.9)
+        b.plot([], [], ls="none", marker="o", mfc="none", mec=INK2, label="direct SMC estimate")
         b.axhline(0, color=AXIS, lw=1)
         b.set_xlabel(r"$\lambda$")
-        b.set_ylabel(r"$\ln\hat Z_v(\lambda)-\ln Z_v^{\rm exact}(\lambda)$")
-        b.set_title("Ideal ABPs: SMC vs exact binomial")
+        b.set_ylabel(r"$\ln Z_v(\lambda)-\ln Z_v^{\rm exact}(\lambda)$")
+        b.set_title("Ideal ABPs vs exact binomial (filled: WHAM)")
         b.legend(ncol=2)
     fig.tight_layout()
     fig.savefig(path, dpi=160)
