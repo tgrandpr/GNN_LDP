@@ -210,6 +210,18 @@ def fit_inverse_ell(ells, y, yerr=None, order=1):
 # Figures
 # --------------------------------------------------------------------------
 
+def spread_labels(values, min_gap):
+    """Vertical label positions that keep at least min_gap between neighbours."""
+    v = np.asarray(values, float)
+    order = np.argsort(v)
+    pos = v.copy()
+    for k in range(1, order.size):
+        i, j = order[k - 1], order[k]
+        if pos[j] - pos[i] < min_gap:
+            pos[j] = pos[i] + min_gap
+    return pos
+
+
 def fig_scgf(runs, res, ext, path, ideal_ref=True):
     cols = size_colors(len(runs))
     fig, ax = plt.subplots(1, 2, figsize=(10.5, 4.0), gridspec_kw=dict(width_ratios=[1.35, 1]))
@@ -244,9 +256,13 @@ def fig_scgf(runs, res, ext, path, ideal_ref=True):
         coef = ext["coef"][j]
         if coef is not None:
             b.plot(xs, np.polyval(coef[::-1], xs), color=c, lw=1.0)
-        b.annotate(f"$\\lambda={l:+g}$", (0, ext["psi_inf"][j]), xytext=(9, 0), textcoords="offset points",
-                   color=INK2, fontsize=8, va="center")
         b.plot([0], [ext["psi_inf"][j]], marker="D", color=ORANGE, ms=5)
+    if sel:
+        lo_, hi_ = b.get_ylim()
+        yv = [ext["psi_inf"][int(np.argmin(np.abs(ext["lam"] - l)))] for l in sel]
+        for l, y0, yl in zip(sel, yv, spread_labels(yv, 0.06 * (hi_ - lo_))):
+            b.annotate(f"$\\lambda={l:+g}$", (0, y0), xytext=(0.006, yl), textcoords="data",
+                       color=INK2, fontsize=8, va="center")
     b.set_xlabel(r"$1/\ell$")
     b.set_ylabel(r"$\psi_v(\lambda)$")
     b.set_title(r"Convergence as $v=\ell^2\to\infty$")
@@ -279,10 +295,13 @@ def fig_rate(runs, res, ext, path, exact=None):
     a.set_title("Rate function: lines = WHAM, points = tilted ensembles")
     top = np.nanmax(ext["I_inf"]) * 1.25 if np.any(np.isfinite(ext["I_inf"])) else None
     a.set_ylim(-0.01, top)
-    a.legend(loc="upper center", ncol=2)
+    xmax = max(np.nanmax(q["rho"]) for q in res)
+    a.set_xlim(left=-0.02, right=xmax + 0.45)
+    a.legend(loc="upper right", ncol=1, fontsize=7.5)
     b = ax[1]
     xs = np.linspace(0, 1.05 / min(r["ell"] for r in runs), 50)
     lc = [BLUE_RAMP[2], BLUE_RAMP[4], BLUE_RAMP[7], BLUE_RAMP[9]]
+    labs = []
     for k, (rs, c) in enumerate(zip(ext["rho_sel"], lc)):
         y = [np.interp(rs, q["rho"], q["I"], left=np.nan, right=np.nan) for q in res]
         b.plot([1 / r["ell"] for r in runs], y, color=c, marker="o", ls="none", ms=4.5)
@@ -290,7 +309,12 @@ def fig_rate(runs, res, ext, path, exact=None):
         if coef is not None:
             b.plot(xs, np.polyval(coef[::-1], xs), color=c, lw=1.0)
             b.plot([0], [coef[0]], marker="D", color=ORANGE, ms=5)
-            b.annotate(f"$\\rho={rs:.2f}$", (0, coef[0]), xytext=(9, 0), textcoords="offset points",
+            labs.append((rs, coef[0]))
+    if labs:
+        lo_, hi_ = b.get_ylim()
+        ypos = spread_labels([y for _, y in labs], 0.06 * (hi_ - lo_))
+        for (rs, y0), yl in zip(labs, ypos):
+            b.annotate(f"$\\rho={rs:.2f}$", (0, y0), xytext=(0.006, yl), textcoords="data",
                        color=INK2, fontsize=8, va="center")
     b.set_xlabel(r"$1/\ell$")
     b.set_ylabel(r"$I_v(\rho)$")
