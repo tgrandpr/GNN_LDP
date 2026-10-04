@@ -1,0 +1,48 @@
+{
+  "args": {
+    "out": "results/abp_pe24",
+    "preset": "default",
+    "ells": [
+      6.0,
+      8.0,
+      10.0,
+      12.0,
+      14.0
+    ],
+    "kappa": 3.0,
+    "rho0": null,
+    "v0": null,
+    "Dr": null,
+    "dt": null,
+    "biasing": [
+      -1.25,
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.25,
+      0.5,
+      0.75,
+      1.0,
+      1.25
+    ],
+    "M": 128,
+    "R": 3,
+    "horizon_factor": 2.5,
+    "t_burn": 5.0,
+    "t_prod": 2.0,
+    "unguided": false,
+    "seed": 0,
+    "overwrite": false
+  },
+  "params": {
+    "rho0": 0.4,
+    "v0": 24.0,
+    "Dt": 1.0,
+    "Dr": 3.0,
+    "eps": 1.0,
+    "dt": 0.0001,
+    "interacting": true,
+    "force_cap": 0.0
+  }
+}
