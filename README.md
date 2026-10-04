@@ -3,6 +3,8 @@ Implement a scalable graph neural network algorithm for dynamical large deviatio
 
 ## Static large deviations of the subvolume density of active Brownian particles (`abp_ldp/`)
 
+The theory behind the code is summarised in [`docs/THEORY.md`](docs/THEORY.md).
+
 This package computes the large-deviation function of the **particle density in a
 subvolume** of a two-dimensional system of active Brownian particles (ABPs), with the
 **subvolume area `v` as the large parameter** (not time). The observable is the
